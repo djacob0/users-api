@@ -1,10 +1,9 @@
-const bcrypt = require("bcryptjs"); // Hash passwords
+const bcrypt = require("bcryptjs"); 
 const jwt = require("jsonwebtoken");
 const UserModel = require("../models/UserModel");
 require("dotenv").config();
 
-const SECRET_KEY = process.env.JWT_SECRET || "my_very_secret_key"; // Use env variable for security
-
+const SECRET_KEY = process.env.JWT_SECRET || "my_very_secret_key"; 
 class UserController {
   static async getAllUsers(req, res) {
     try {
