@@ -24,25 +24,42 @@ class UserController {
     }
   }
 
-    static async registerUser(req, res) {
-      try {
-          const { username, password, email, created_by } = req.body;
+  static async registerUser(req, res) {
+    try {
+        console.log("Request User:", req.user);
 
-          if (!username || !password || !email) {
-              return res.status(400).json({ message: "All fields are required" });
-          }
+        const allowedFields = ["username", "password", "email", "firstName", "middleName", "lastName"];
+        const userData = {};
 
-          const existingUser = await UserModel.getUserByUsername(username);
-          if (existingUser) {
-              return res.status(400).json({ message: "Username already exists" });
-          }
+        Object.keys(req.body).forEach((key) => {
+            if (allowedFields.includes(key)) {
+                userData[key] = req.body[key];
+            }
+        });
 
-          const userId = await UserModel.createUser({ username, password, email, created_by });
-          res.status(201).json({ message: "User registered successfully", userId });
-      } catch (err) {
-          res.status(500).json({ error: err.message });
-      }
-  }
+        if (!userData.username || !userData.password || !userData.email) {
+            return res.status(400).json({ message: "Username, password, and email are required" });
+        }
+
+        if (!req.user || !req.user.id) {
+            return res.status(401).json({ message: "Unauthorized: Invalid session" });
+        }
+
+        userData.created_by = req.user.id; // ✅ Set created_by from logged-in user
+
+        const existingUser = await UserModel.getUserByUsername(userData.username);
+        if (existingUser) {
+            return res.status(400).json({ message: "Username already exists" });
+        }
+
+        const userId = await UserModel.createUser(userData);
+        res.status(201).json({ message: "User registered successfully", userId });
+    } catch (err) {
+        console.error("Register Error:", err.message);
+        res.status(500).json({ error: err.message });
+    }
+}
+
 
     static async loginUser(req, res) {
       try {
@@ -74,19 +91,34 @@ class UserController {
   }
 
   static async logoutUser(req, res) {
-      try {
-          const token = req.headers.authorization?.split(" ")[1];
-          if (!token) return res.status(401).json({ message: "No token provided" });
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith("Bearer ")) {
+            return res.status(401).json({ message: "No token provided" });
+        }
 
-          // Expire session in database
-          const success = await UserModel.expireSession(token);
-          if (!success) return res.status(400).json({ message: "Invalid session or already logged out" });
+        const token = authHeader.split(" ")[1];
 
-          res.json({ message: "Logout successful" });
-      } catch (err) {
-          res.status(500).json({ error: err.message });
-      }
-  }
+        // Verify token before expiring session
+        try {
+            const decoded = jwt.verify(token, SECRET_KEY);
+            const session = await UserModel.getSession(token);
+            if (!session) {
+                return res.status(400).json({ message: "Session not found or already logged out" });
+            }
+        } catch (error) {
+            return res.status(401).json({ message: "Invalid or expired token" });
+        }
+
+        // Expire session in database
+        const success = await UserModel.expireSession(token);
+        if (!success) return res.status(400).json({ message: "Invalid session or already logged out" });
+
+        res.json({ message: "Logout successful" });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+} 
   static async updateUser(req, res) {
     try {
       const userId = req.params.id;

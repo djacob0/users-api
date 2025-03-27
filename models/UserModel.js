@@ -18,24 +18,33 @@ class UserModel {
     }
   
     static async createUser(user) {
-        const userData = {
-          ...user,
-          created_by: user.created_by || 1, 
-          updated_at: null, 
+      if (!user.firstName) {
+          throw new Error("First name is required");
+      }
+  
+      const userData = {
+          username: user.username,
+          password: user.password,
+          email: user.email,
+          firstName: user.firstName || "",  // Ensure a value is set
+          middleName: user.middleName || "",
+          lastName: user.lastName || "",
+          created_by: user.created_by || 1,
+          updated_at: null,
           updated_by: null  
-        };
-      
-        const fields = Object.keys(userData).join(", ");
-        const placeholders = Object.keys(userData).map(() => "?").join(", ");
-        const values = Object.values(userData);
-      
-        const [result] = await pool.query(
+      };
+  
+      const fields = Object.keys(userData).join(", ");
+      const placeholders = Object.keys(userData).map(() => "?").join(", ");
+      const values = Object.values(userData);
+  
+      const [result] = await pool.query(
           `INSERT INTO tbl_users (${fields}) VALUES (${placeholders})`,
           values
-        );
-      
-        return result.insertId;
-      }      
+      );
+  
+      return result.insertId;
+  }   
 
       static async updateUser(id, userData) {
         const updatedBy = userData.updated_by || "SYSTEM";
