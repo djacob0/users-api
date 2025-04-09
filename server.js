@@ -2,16 +2,26 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const bodyParser = require("body-parser");
-const sessionMiddleware = require("./middleware/authMiddleware");
+const session = require("express-session");
 
 const app = express();
 
 app.use(cors());
 app.use(bodyParser.json());
-app.use(sessionMiddleware);
 
-const userRoutes = require("./routes/userRoutes");
-app.use("/api", userRoutes); 
+app.use(
+    session({
+        secret: process.env.SESSION_SECRET,
+        resave: false,
+        saveUninitialized: true,
+        cookie: { secure: false },
+    })
+);
+
+const UserRoutes = require("./routes/UserRoutes");
+app.use("/api", UserRoutes);
+
+app.get("/", (req, res) => res.send("API is running..."));
 
 app.use((err, req, res, next) => {
     console.error("Server Error:", err);
@@ -19,4 +29,4 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));

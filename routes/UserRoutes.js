@@ -1,14 +1,19 @@
 const express = require("express");
 const UserController = require("../controllers/UserController");
-const sessionMiddleware = require("../middleware/authMiddleware");
-
 const router = express.Router();
 
-router.get("/users", sessionMiddleware, UserController.getAllUsers);
-router.get("/users/:id", sessionMiddleware, UserController.getUserById);
-router.post("/register", UserController.registerUser);
-router.post("/login", UserController.loginUser);
-router.put("/users/:id", sessionMiddleware, UserController.updateUser);
-router.delete("/users/:id", sessionMiddleware, UserController.deleteUser);
+router.post("/signup", UserController.signup);
+router.post("/login", UserController.login);
+router.post("/logout", UserController.logout);
+router.get("/profile", UserController.profile);
+router.get("/users", UserController.getAllUsers);
+router.post("/users", UserController.createUser);
+router.put("/users/:id", UserController.updateUser); 
+router.delete("/users/:id", UserController.deleteUser);
+router.post("/verify-login-otp", UserController.verifyLoginOtp);
+router.post("/verify-signup-otp", UserController.verifySignupOtp);
+router.post('/forgot-password', UserController.requestPasswordReset);
+router.post('/reset-password', UserController.verifyPasswordReset);
+router.post('/resend-otp', UserController.resendOtp);
 
 module.exports = router;

@@ -3,7 +3,6 @@ const crypto = require("crypto");
 
 const OtpModel = {
     createOtp: async (userId, email, purpose) => {
-        // First, invalidate any previous OTPs for this user/email/purpose
         await db.query(
             `UPDATE tbl_otps 
              SET expires_at = NOW() 
@@ -27,7 +26,6 @@ const OtpModel = {
     },
 
     verifyOtp: async (userId, otpCode, purpose) => {
-        // Find the most recent valid OTP that matches
         const [otp] = await db.query(
             `SELECT * FROM tbl_otps 
              WHERE (user_id = ? OR email IN (SELECT email FROM tbl_users WHERE id = ?))
@@ -40,7 +38,6 @@ const OtpModel = {
         );
 
         if (otp.length > 0) {
-            // Invalidate this OTP so it can't be used again
             await db.query(
                 `UPDATE tbl_otps 
                  SET expires_at = NOW() 
