@@ -170,16 +170,32 @@ const verifyLoginOtp = async (req, res) => {
     try {
         const { userId, otpCode } = req.body;
         
-        if (!userId || !otpCode) {
-            return res.status(400).json({ message: "User ID and OTP code are required" });
+        const now = new Date();
+        const nowUTC = new Date(now.toISOString());
+        
+        const [otpRecord] = await db.query(
+            `SELECT *, UTC_TIMESTAMP() as current_db_time 
+             FROM tbl_otps 
+             WHERE user_id = ? 
+             AND otp_code = ? 
+             AND purpose = 'login'`,
+            [userId, otpCode]
+        );
+
+        if (!otpRecord.length) {
+            return res.status(400).json({ message: "Invalid OTP code" });
         }
 
-        const isValid = await OtpModel.verifyOtp(userId, otpCode, "login");
-        if (!isValid) {
-            return res.status(400).json({ message: "Invalid or expired OTP" });
+        const otp = otpRecord[0];
+        const expiresAt = new Date(otp.expires_at);
+        
+        if (nowUTC > expiresAt) {
+            await db.query(`DELETE FROM tbl_otps WHERE id = ?`, [otp.id]);
+            return res.status(400).json({ message: "OTP expired" });
         }
 
-        await OtpModel.invalidateOtp(otpCode);
+        await db.query(`DELETE FROM tbl_otps WHERE id = ?`, [otp.id]);
+        
         const token = jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: "24h" });
         await UserModel.createSession(userId, token, req.ip, req.headers["user-agent"]);
 
