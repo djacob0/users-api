@@ -2,28 +2,6 @@ const db = require("../config/db");
 const bcrypt = require("bcryptjs");
 
 const UserModel = {
-    createUser: async (userData) => {
-        const requiredFields = ["username", "password", "email", "firstName", "lastName"];
-        for (const field of requiredFields) {
-            if (!userData[field]) {
-                throw new Error(`Field "${field}" cannot be null or empty.`);
-            }
-        }
-
-        userData.status = userData.status || "active";
-        userData.accountLevel = userData.accountLevel || 1;
-        userData.created_at = new Date();
-        userData.created_by = 1;
-
-        const columns = Object.keys(userData).map((key) => `\`${key}\``).join(", ");
-        const placeholders = Object.keys(userData).map(() => "?").join(", ");
-        const values = Object.values(userData);
-
-        const query = `INSERT INTO tbl_users (${columns}) VALUES (${placeholders})`;
-
-        const [result] = await db.query(query, values);
-        return result.insertId;
-    },
 
     checkApprovalStatus: async (userId) => {
         const [user] = await db.query(
@@ -85,7 +63,7 @@ const UserModel = {
         return users;
     },
 
-    createUser: async (userData, userId) => {
+    createUser: async (userData) => {
         const requiredFields = ["username", "password", "email", "firstName", "lastName"];
         for (const field of requiredFields) {
             if (!userData[field]) {
@@ -93,39 +71,42 @@ const UserModel = {
             }
         }
 
-        userData.status = userData.status || "active";
-        userData.accountLevel = userData.accountLevel || 1;
-        userData.created_at = new Date();
-        userData.created_by = userId; 
-        userData.updated_at = new Date();
-        userData.updated_by = userId;
+        const defaultValues = {
+            status: 'PENDING',
+            accountLevel: 3,
+            isApproved: false,
+            created_at: new Date(),
+            updated_at: new Date()
+        };
 
-        const columns = Object.keys(userData).map((key) => `\`${key}\``).join(", ");
-        const placeholders = Object.keys(userData).map(() => "?").join(", ");
-        const values = Object.values(userData);
+        const finalUserData = { ...defaultValues, ...userData };
 
-        const query = `INSERT INTO tbl_users (${columns}) VALUES (${placeholders})`;
+        const columns = Object.keys(finalUserData).map(key => `\`${key}\``).join(", ");
+        const placeholders = Object.keys(finalUserData).map(() => "?").join(", ");
+        const values = Object.values(finalUserData);
 
-        const [result] = await db.query(query, values);
+        const [result] = await db.query(
+            `INSERT INTO tbl_users (${columns}) VALUES (${placeholders})`,
+            values
+        );
+
         return result.insertId;
     },
 
-    updateUser: async (userId, userData) => {
-        try {
-            if (!userData || Object.keys(userData).length === 0) {
-                throw new Error("No data to update");
-            }
-    
-            const updates = Object.keys(userData)
-                .map((key) => `${key} = ?`)
-                .join(", ");
-            const values = [...Object.values(userData), userData.id];
-            const query = `UPDATE tbl_users SET ${updates} WHERE id = ?`;
-    
-            await db.query(query, values);
-        } catch (error) {
-            throw new Error("Error updating user: " + error.message);
-        }
+    updateUser: async (updateData) => {
+        const { id, status, accountLevel, updated_by, updated_at } = updateData;
+        
+        const [result] = await db.query(
+            `UPDATE tbl_users 
+             SET status = ?,
+                 accountLevel = ?,
+                 updated_by = ?,
+                 updated_at = ?
+             WHERE id = ?`,
+            [status, accountLevel, updated_by, updated_at, id]
+        );
+        
+        return result;
     },
 
     deleteUser: async (userId, targetUserId) => {
@@ -135,7 +116,52 @@ const UserModel = {
         await db.query(query, [targetUserId, userId]);
     },
 
+    // generateMFAToken: async (userId) => {
+    //     const token = Buffer.from(`${userId}:${Date.now()}`).toString('base64');
+    //     await db.query(
+    //         `UPDATE tbl_users SET mfa_token = ?, mfa_token_expires = DATE_ADD(NOW(), INTERVAL 5 MINUTE) WHERE id = ?`,
+    //         [token, userId]
+    //     );
+    //     return token;
+    // },
+
+    // verifyMFAToken: async (userId, token) => {
+    //     const [result] = await db.query(
+    //         `SELECT mfa_token, mfa_token_expires 
+    //         FROM tbl_users 
+    //         WHERE id = ? 
+    //         AND mfa_token = ?
+    //         AND mfa_token_expires > NOW()`,
+    //         [userId, token]
+    //     );
+    //     return result.length > 0;
+    // },
+
+    // clearMFAToken: async (userId) => {
+    //     await db.query(
+    //         `UPDATE tbl_users SET mfa_token = NULL, mfa_token_expires = NULL WHERE id = ?`,
+    //         [userId]
+    //     );
+    // },
+
     // this is for account levels
+
+    updateUserProfile: async (updateData) => {
+        const { id, phoneNumber, firstName, lastName, email, updated_at } = updateData;
+        
+        const [result] = await db.query(
+            `UPDATE tbl_users 
+            SET phoneNumber = ?,
+                firstName = ?,
+                lastName = ?,
+                email = ?,
+                updated_at = ?
+            WHERE id = ?`,
+            [phoneNumber, firstName, lastName, email, updated_at, id]
+        );
+        
+        return result;
+    },
 
     getUserWithLevel: async (userId) => {
         const [users] = await db.query(`
@@ -152,7 +178,7 @@ const UserModel = {
             SELECT u.*, al.name as levelName 
             FROM tbl_users u
             LEFT JOIN tbl_account_level al ON u.accountLevel = al.id
-            WHERE u.isApproved = 0
+            WHERE u.isApproved = 0 AND u.status = 'PENDING'
         `);
         return users;
     },
@@ -161,6 +187,7 @@ const UserModel = {
         await db.query(`
             UPDATE tbl_users 
             SET isApproved = 1, 
+                status = 'APPROVED',
                 updated_by = ?,
                 updated_at = NOW()
             WHERE id = ?

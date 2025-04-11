@@ -19,6 +19,8 @@ app.use(
 );
 
 const UserRoutes = require("./routes/UserRoutes");
+const ApproverRoutes = require("./routes/ApproverRoutes");
+app.use("/api", ApproverRoutes);
 app.use("/api", UserRoutes);
 
 app.get("/", (req, res) => res.send("API is running..."));
