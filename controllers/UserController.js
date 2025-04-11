@@ -56,35 +56,53 @@ const createUser = async (req, res) => {
     }
 };
 
-const updateUser = async (req, res) => {
+const updateUser = async () => {
+    if (!selectedUser.username || !selectedUser.email || !selectedUser.firstName || !selectedUser.lastName) {
+        Swal.fire({
+            icon: "error",
+            title: "Missing Fields",
+            text: "Please fill in all required fields!",
+        });
+        return;
+    }
+
+    const token = localStorage.getItem("authToken");
+    if (!token) {
+        Swal.fire({ icon: "error", title: "Unauthorized", text: "Authentication token not found. Please log in." });
+        return;
+    }
+
     try {
-        const userIdToUpdate = req.params.id;
-        const { created_at, deleted_at, ...updateFields } = req.body;
-        const token = req.headers.authorization?.split(" ")[1];
+        const response = await api.put(`/api/users-by-approver/${selectedUser.id}`, selectedUser, {
+            headers: { Authorization: `Bearer ${token}` },
+        });
 
-        if (!token) return res.status(401).json({ message: "Unauthorized" });
+        setIsModalOpen(false);
+        setSelectedUser(null);
+        fetchUsers();
 
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const loggedInUserId = decoded.userId;
-
-        if (!userIdToUpdate) return res.status(400).json({ message: "User ID is required" });
-
-        const user = await UserModel.getUserById(userIdToUpdate);
-        if (!user) return res.status(404).json({ message: "User not found" });
-
-        const updateData = {
-            ...updateFields,
-            id: userIdToUpdate,
-            updated_by: loggedInUserId,
-            updated_at: new Date(),
-        };
-
-        await UserModel.updateUser(loggedInUserId, updateData);
-
-        res.json({ message: "User updated successfully" });
+        Swal.fire({ 
+            icon: "success", 
+            title: "User Updated", 
+            text: "User successfully updated!",
+            timer: 2000, 
+            showConfirmButton: false 
+        });
     } catch (error) {
-        console.error("Update User Error:", error);
-        res.status(500).json({ message: "Server error", error: error.message });
+        console.error("Error updating user:", error.response?.data || error.message);
+        
+        let errorMessage = "Error updating user.";
+        if (error.response?.data?.error === "DUPLICATE_USERNAME") {
+            errorMessage = "Username already exists. Please choose a different username.";
+        } else if (error.response?.data?.message) {
+            errorMessage = error.response.data.message;
+        }
+
+        Swal.fire({ 
+            icon: "error", 
+            title: "Error", 
+            text: errorMessage
+        });
     }
 };
 
@@ -150,8 +168,17 @@ const login = async (req, res) => {
 
         const user = await UserModel.getUserByEmail(email);
         if (!user) return res.status(400).json({ message: "Invalid credentials" });
+
+        if (user.status === "PENDING" || user.status === "REJECTED") {
+            return res.status(403).json({
+                message: "Your account is not approved. Please wait for approval or contact an administrator.",
+                requiresApproval: true
+            });
+        }
+
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) return res.status(400).json({ message: "Invalid credentials" });
+        
         const otpCode = await OtpModel.createOtp(user.id, user.email, "login");
         await sendOtpEmail(user.email, otpCode, "login");
 
@@ -165,6 +192,7 @@ const login = async (req, res) => {
         res.status(500).json({ message: "Server error", error: error.message });
     }
 };
+
 
 const verifyLoginOtp = async (req, res) => {
     try {
@@ -211,31 +239,35 @@ const verifyLoginOtp = async (req, res) => {
 const signup = async (req, res) => {
     try {
         const { username, password, email, firstName, lastName, middleName, phoneNumber } = req.body;
-        console.log("Session Data:", req.session);
 
         if (!username || !password || !email || !firstName || !lastName) {
             return res.status(400).json({ message: "All required fields must be filled" });
         }
+        
+        if (password.length < 8) {
+            return res.status(400).json({ message: "Password must be at least 8 characters long" });
+        }
+        
+        if (!/[A-Z]/.test(password)) {
+            return res.status(400).json({ message: "Password must contain at least one capital letter" });
+        }
+        
+        if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) {
+            return res.status(400).json({ message: "Password must contain at least one special character" });
+        }
+        
         const existingUser = await UserModel.getUserByEmail(email);
         if (existingUser) return res.status(400).json({ message: "Email already exists" });
 
-        const [emailCheck] = await db.query("SELECT id FROM tbl_users WHERE email = ?", [email]);
-        if (emailCheck.length > 0) return res.status(400).json({ message: "Email already registered" });
-        
-        req.session.tempUser = {
-            username,
-            password,
-            email,
-            firstName,
-            middleName,
-            lastName,
-            phoneNumber
-        };
-
-        console.log("Session Data:", req.session);
-
         const otpCode = await OtpModel.createOtp(null, email, "registration");
         await sendOtpEmail(email, otpCode, "registration");
+
+        await db.query(
+            `INSERT INTO temp_signups 
+             (username, password, email, first_name, last_name, middle_name, phone_number, otp_code)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [username, password, email, firstName, lastName, middleName || null, phoneNumber || null, otpCode]
+        );
 
         res.json({ 
             message: "OTP sent to your email for verification",
@@ -249,57 +281,47 @@ const signup = async (req, res) => {
 
 const verifySignupOtp = async (req, res) => {
     try {
-        const { email, otpCode, username, password, firstName, middleName, lastName, phoneNumber } = req.body;
+        const { email, otpCode } = req.body;
         
         if (!email || !otpCode) {
             return res.status(400).json({ message: "Email and OTP code are required" });
         }
 
-        const [otpRecord] = await db.query(
-            `SELECT * FROM tbl_otps 
-             WHERE email = ? 
-             AND otp_code = ? 
-             AND purpose = 'registration'
-             AND (user_id IS NULL OR user_id = 0)`,
+        const [tempUser] = await db.query(
+            `SELECT * FROM temp_signups 
+             WHERE email = ? AND otp_code = ?`,
             [email, otpCode]
         );
 
-        if (!otpRecord.length) {
-            return res.status(400).json({ message: "OTP not found" });
+        if (!tempUser.length) {
+            return res.status(400).json({ message: "Invalid OTP code" });
         }
 
-        const otp = otpRecord[0];
-        const now = new Date();
-        const expiresAt = new Date(otp.expires_at);
+        const userData = tempUser[0];
+        const hashedPassword = await bcrypt.hash(userData.password, 10);
 
-        if (now > expiresAt) {
-            await db.query(`DELETE FROM tbl_otps WHERE id = ?`, [otp.id]);
-            return res.status(400).json({ message: "OTP expired" });
-        }
-
-        const hashedPassword = await bcrypt.hash(password, 10);
         const userId = await UserModel.createUser({
-            username,
+            username: userData.username,
             password: hashedPassword,
-            email,
-            firstName,
-            middleName: middleName || "",
-            lastName,
-            phoneNumber: phoneNumber || null,
+            email: userData.email,
+            firstName: userData.first_name,
+            lastName: userData.last_name,
+            middleName: userData.middle_name,
+            phoneNumber: userData.phone_number,
+            isApproved: false,
+            status: 'PENDING',
+            accountLevel: 3
         });
 
-        await db.query(
-            "UPDATE tbl_otps SET user_id = ? WHERE id = ?",
-            [userId, otp.id]
-        );
+        await db.query(`DELETE FROM temp_signups WHERE email = ?`, [email]);
 
-        res.status(201).json({ message: "User registered successfully" });
+        res.status(201).json({ 
+            message: "Registration successful. Your account is pending admin approval.",
+            requiresApproval: true
+        });
     } catch (error) {
         console.error("Signup OTP Verification Error:", error);
-        res.status(500).json({ 
-            message: "Server error", 
-            error: error.message
-        });
+        res.status(500).json({ message: "Server error", error: error.message });
     }
 };
 
@@ -458,9 +480,6 @@ const profile = async (req, res) => {
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         const user = await UserModel.getUserById(decoded.userId);
-
-        console.log("user", user);
-
         if (!user) return res.status(404).json({ message: "User not found" });
 
         res.json({ user });
@@ -487,6 +506,38 @@ const logout = async (req, res) => {
     }
 };
 
+const updateUserProfile = async (req, res) => {
+    try {
+        const userId = req.params.id;
+        const { phoneNumber, firstName, lastName, email } = req.body;
+        const token = req.headers.authorization?.split(" ")[1];
+
+        if (!token) return res.status(401).json({ message: "Unauthorized" });
+
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const requester = await UserModel.getUserById(decoded.userId);
+
+        if (requester.id !== parseInt(userId)){
+            return res.status(403).json({ message: "Can only update your own profile" });
+        }
+
+        const updateData = {
+            id: userId,
+            phoneNumber,
+            firstName,
+            lastName,
+            email,
+            updated_at: new Date()
+        };
+
+        await UserModel.updateUserProfile(updateData);
+        res.json({ message: "Profile updated successfully" });
+    } catch (error) {
+        console.error("Profile update error:", error);
+        res.status(500).json({ message: "Server error", error: error.message });
+    }
+};
+
 
 module.exports = {
     getAllUsers,
@@ -501,5 +552,6 @@ module.exports = {
     verifyPasswordReset,
     resendOtp,
     logout,
-    profile
+    profile,
+    updateUserProfile
 };
