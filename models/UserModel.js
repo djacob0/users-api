@@ -146,6 +146,31 @@ const UserModel = {
 
     // this is for account levels
 
+    // In UserModel.js
+    getUsersByAccountLevels: async (levels) => {
+        const [users] = await db.query(
+            `SELECT id, username, email, firstName, lastName, 
+                    status, accountLevel, created_at 
+             FROM tbl_users 
+             WHERE accountLevel IN (?) 
+             AND username != 'system'
+             ORDER BY accountLevel, created_at`,
+            [levels]
+        );
+        return users;
+    },
+
+    getAllNonSystemUsers: async () => {
+        const [users] = await db.query(
+            `SELECT id, username, email, firstName, lastName, 
+                    status, accountLevel, created_at 
+             FROM tbl_users 
+             WHERE username != 'system' 
+             ORDER BY accountLevel, created_at`
+        );
+        return users;
+    },
+
     updateUserProfile: async (updateData) => {
         const { id, phoneNumber, firstName, lastName, email, updated_at } = updateData;
         

@@ -74,11 +74,23 @@ const getUsersByApprover = async (req, res) => {
         if (!token) return res.status(401).json({ message: "Unauthorized" });
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const approver = await UserModel.getUserById(decoded.userId);
-        if (approver.accountLevel > 2 && ![1, 2].includes(approver.id)) {
-            return res.status(403).json({ message: "Forbidden: Insufficient privileges" });
+        const currentUser = await UserModel.getUserById(decoded.userId);
+        
+        if (!currentUser) {
+            return res.status(404).json({ message: "User not found" });
         }
-        const users = await UserModel.getAllUsers();
+
+        let users;
+        
+        if (currentUser.accountLevel === 1) {
+            users = await UserModel.getAllNonSystemUsers();
+        } else if (currentUser.accountLevel === 2) {
+            users = await UserModel.getUsersByAccountLevels([2]);
+        } else if (currentUser.accountLevel === 3) {
+            users = [await UserModel.getUserById(currentUser.id)];
+        } else {
+            return res.status(403).json({ message: "Forbidden: Invalid account level" });
+        }
 
         const sanitizedUsers = users.map(user => ({
             id: user.id,
@@ -94,7 +106,10 @@ const getUsersByApprover = async (req, res) => {
         res.json({ users: sanitizedUsers });
     } catch (error) {
         console.error("Get Users by Approver Error:", error);
-        res.status(500).json({ message: "Server error", error: error.message });
+        res.status(500).json({ 
+            message: "Server error", 
+            error: error.message 
+        });
     }
 };
 
