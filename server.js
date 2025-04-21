@@ -20,8 +20,12 @@ app.use(
 
 const UserRoutes = require("./routes/UserRoutes");
 const ApproverRoutes = require("./routes/ApproverRoutes");
+const EmailRoutes = require('./routes/EmailRoutes');
+// const FFRSAuthRoute = require("./routes/FFRSAuthRoute");
+// app.use("/api", FFRSAuthRoute);
 app.use("/api", ApproverRoutes);
 app.use("/api", UserRoutes);
+app.use('/api/email', EmailRoutes);
 
 app.get("/", (req, res) => res.send("API is running..."));
 
@@ -31,4 +35,4 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`Server running on http://172.17.150.164:${PORT}`));

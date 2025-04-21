@@ -238,38 +238,54 @@ const verifyLoginOtp = async (req, res) => {
 };
 const signup = async (req, res) => {
     try {
-        const { username, password, email, firstName, lastName, middleName, phoneNumber } = req.body;
+        const { username, password, email, firstName, lastName, middleName, phoneNumber, accountLevel } = req.body;
 
         if (!username || !password || !email || !firstName || !lastName) {
             return res.status(400).json({ message: "All required fields must be filled" });
         }
-        
+
         if (password.length < 8) {
             return res.status(400).json({ message: "Password must be at least 8 characters long" });
         }
-        
+
         if (!/[A-Z]/.test(password)) {
             return res.status(400).json({ message: "Password must contain at least one capital letter" });
         }
-        
+
         if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) {
             return res.status(400).json({ message: "Password must contain at least one special character" });
         }
-        
+
+        if (accountLevel && ![1, 2, 3].includes(parseInt(accountLevel))) {
+            return res.status(400).json({ message: "Invalid account level" });
+        }
+
         const existingUser = await UserModel.getUserByEmail(email);
         if (existingUser) return res.status(400).json({ message: "Email already exists" });
 
         const otpCode = await OtpModel.createOtp(null, email, "registration");
         await sendOtpEmail(email, otpCode, "registration");
 
+        const bcrypt = require("bcrypt");
+        const hashedPassword = await bcrypt.hash(password, 10);
+
         await db.query(
             `INSERT INTO temp_signups 
-             (username, password, email, first_name, last_name, middle_name, phone_number, otp_code)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [username, password, email, firstName, lastName, middleName || null, phoneNumber || null, otpCode]
+             (username, password, email, first_name, last_name, middle_name, phone_number, otp_code, accountLevel)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                username,
+                hashedPassword,
+                email,
+                firstName,
+                lastName,
+                middleName || null,
+                phoneNumber || null,
+                otpCode,
+                accountLevel || 3
+            ]
         );
-
-        res.json({ 
+        res.json({
             message: "OTP sent to your email for verification",
             requiresOtp: true
         });
@@ -310,7 +326,7 @@ const verifySignupOtp = async (req, res) => {
             phoneNumber: userData.phone_number,
             isApproved: false,
             status: 'PENDING',
-            accountLevel: 3
+            accountLevel: userData.accountLevel || 3
         });
 
         await db.query(`DELETE FROM temp_signups WHERE email = ?`, [email]);

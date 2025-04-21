@@ -70,27 +70,45 @@ const UserModel = {
                 throw new Error(`Field "${field}" cannot be null or empty.`);
             }
         }
-
+    
+        if (userData.accountLevel && ![1, 2, 3].includes(parseInt(userData.accountLevel))) {
+            throw new Error("Invalid account level. Must be 1, 2, or 3.");
+        }
+    
         const defaultValues = {
             status: 'PENDING',
-            accountLevel: 3,
+            accountLevel: userData.accountLevel || 3,
             isApproved: false,
             created_at: new Date(),
             updated_at: new Date()
         };
-
+    
         const finalUserData = { ...defaultValues, ...userData };
-
+    
+        if (finalUserData.password && !finalUserData.password.startsWith('$2a$')) {
+            finalUserData.password = await bcrypt.hash(finalUserData.password, 10);
+        }
+    
         const columns = Object.keys(finalUserData).map(key => `\`${key}\``).join(", ");
         const placeholders = Object.keys(finalUserData).map(() => "?").join(", ");
         const values = Object.values(finalUserData);
-
-        const [result] = await db.query(
-            `INSERT INTO tbl_users (${columns}) VALUES (${placeholders})`,
-            values
-        );
-
-        return result.insertId;
+    
+        try {
+            const [result] = await db.query(
+                `INSERT INTO tbl_users (${columns}) VALUES (${placeholders})`,
+                values
+            );
+            return result.insertId;
+        } catch (error) {
+            if (error.code === 'ER_DUP_ENTRY') {
+                if (error.message.includes('username')) {
+                    throw new Error("Username already exists");
+                } else if (error.message.includes('email')) {
+                    throw new Error("Email already exists");
+                }
+            }
+            throw error;
+        }
     },
 
     updateUser: async (updateData) => {
@@ -209,14 +227,15 @@ const UserModel = {
     },
 
     approveUser: async (userId, approverId) => {
-        await db.query(`
-            UPDATE tbl_users 
-            SET isApproved = 1, 
-                status = 'APPROVED',
-                updated_by = ?,
-                updated_at = NOW()
-            WHERE id = ?
-        `, [approverId, userId]);
+    const [user] = await db.execute('SELECT account_level FROM users WHERE id = ?', [userId]);
+    const currentAccountLevel = user[0].account_level;
+
+    await db.execute(
+        'UPDATE users SET status = "approved", approved_by = ?, approved_at = NOW() WHERE id = ?',
+        [approverId, userId]
+    );
+
+    return currentAccountLevel;
     },
 
     rejectUser: async (userId, approverId) => {

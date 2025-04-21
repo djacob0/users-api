@@ -39,8 +39,26 @@ const approveUser = async (req, res) => {
             return res.status(403).json({ message: "Unauthorized access" });
         }
 
+        const userToApprove = await UserModel.getUserById(userId);
+        if (!userToApprove) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        if (userToApprove.accountLevel < approver.accountLevel) {
+            return res.status(403).json({
+                message: `Cannot approve users with higher privilege level (${userToApprove.accountLevel})`
+            });
+        }
         await UserModel.approveUser(userId, decoded.userId);
-        res.json({ message: "User approved successfully" });
+
+        res.json({
+            message: "User approved successfully",
+            user: {
+                id: userToApprove.id,
+                accountLevel: userToApprove.accountLevel,
+                status: "approved"
+            }
+        });
     } catch (error) {
         console.error("Approve User Error:", error);
         res.status(500).json({ message: "Server error", error: error.message });
